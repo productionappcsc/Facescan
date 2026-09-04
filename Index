@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <video id="video" width="320" height="240" autoplay playsinline></video>
+  <button onclick="capture()">ถ่ายภาพและบันทึก</button>
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <script>
+    const video = document.getElementById('video');
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => { video.srcObject = stream; })
+      .catch(err => { alert("เปิดกล้องไม่ได้: " + err); });
+
+    function capture() {
+      const canvas = document.getElementById('canvas');
+      canvas.getContext('2d').drawImage(video, 0, 0, 320, 240);
+      const imageData = canvas.toDataURL('image/jpeg');
+      
+      // ยิงข้อมูลกลับไปที่ Apps Script ของคุณ
+      fetch("YOUR_APPS_SCRIPT_WEB_APP_URL_HERE", {
+        method: "POST",
+        mode: "no-cors", // สำคัญมากเพื่อเลี่ยงปัญหา CORS
+        body: JSON.stringify({ userId: "testUser", imageData: imageData })
+      }).then(() => alert("บันทึกสำเร็จ!"));
+    }
+  </script>
+</body>
+</html>
