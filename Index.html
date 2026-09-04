@@ -17,7 +17,7 @@
       const imageData = canvas.toDataURL('image/jpeg');
       
       // ยิงข้อมูลกลับไปที่ Apps Script ของคุณ
-      fetch("YOUR_APPS_SCRIPT_WEB_APP_URL_HERE", {
+      fetch("https://script.google.com/macros/s/AKfycbzPsveHyub_MogV0rrtAWE9b5M6Ytc4aTe24WqvL9GlITdug9lTH6Oj4YzkvWU07iZecg/exec", {
         method: "POST",
         mode: "no-cors", // สำคัญมากเพื่อเลี่ยงปัญหา CORS
         body: JSON.stringify({ userId: "testUser", imageData: imageData })
