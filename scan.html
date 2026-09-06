@@ -100,6 +100,28 @@
     }, 700);
   }
 
+ async function init() {
+  try {
+    result.textContent = '⏳ กำลังโหลดโมเดล...';
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+      result.textContent = '🔍 กรุณาหันหน้าเข้ากล้อง';
+      loop();
+    };
+  } catch (err) {
+    result.className = 'result fail';
+    result.textContent = '❌ โหลดไม่สำเร็จ: ' + err.message;
+    console.error(err);
+  }
+}
+ 
   window.addEventListener('load', init);
 
 </script>
