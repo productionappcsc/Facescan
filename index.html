@@ -1,28 +1,115 @@
 <!DOCTYPE html>
-<html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สแกนใบหน้าพนักงาน</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Prompt', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .card {
+    background: #fff; border-radius: 20px; padding: 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.25);
+    max-width: 360px; width: 100%; text-align: center;
+  }
+  .emp-badge {
+    background: #eef2ff; color: #4338ca; border-radius: 12px;
+    padding: 10px 14px; font-weight: 600; margin-bottom: 16px; font-size: 15px;
+  }
+  video, canvas {
+    width: 100%; border-radius: 16px; background: #111;
+  }
+  canvas { display: none; }
+  button {
+    width: 100%; margin-top: 16px; padding: 14px;
+    border: none; border-radius: 12px; font-size: 16px; font-weight: 600;
+    cursor: pointer; transition: .2s;
+  }
+  #btn-capture { background: #4f46e5; color: #fff; }
+  #btn-capture:active { transform: scale(0.97); }
+  #btn-capture:disabled { background: #a5a5a5; cursor: not-allowed; }
+  .status { margin-top: 14px; font-size: 14px; min-height: 20px; color: #555; }
+  .status.success { color: #16a34a; font-weight: 700; }
+  .status.error { color: #dc2626; font-weight: 700; }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid #ddd; border-top-color: #4f46e5;
+    border-radius: 50%; animation: spin .7s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
 <body>
-  <video id="video" width="320" height="240" autoplay playsinline></video>
-  <button onclick="capture()">ถ่ายภาพและบันทึก</button>
-  <canvas id="canvas" style="display:none;"></canvas>
+  <div class="card">
+    <div class="emp-badge" id="emp-badge">กำลังโหลดข้อมูลพนักงาน...</div>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <button id="btn-capture" onclick="capture()">📸 ถ่ายภาพและบันทึก</button>
+    <div class="status" id="status"></div>
+  </div>
 
-  <script>
-    const video = document.getElementById('video');
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => { video.srcObject = stream; })
-      .catch(err => { alert("เปิดกล้องไม่ได้: " + err); });
+<script>
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPsveHyub_MogV0rrtAWE9b5M6Ytc4aTe24WqvL9GlITdug9lTH6Oj4YzkvWU07iZecg/exec";
 
-    function capture() {
-      const canvas = document.getElementById('canvas');
-      canvas.getContext('2d').drawImage(video, 0, 0, 320, 240);
-      const imageData = canvas.toDataURL('image/jpeg');
-      
-      // ยิงข้อมูลกลับไปที่ Apps Script ของคุณ
-      fetch("https://script.google.com/macros/s/AKfycbzPsveHyub_MogV0rrtAWE9b5M6Ytc4aTe24WqvL9GlITdug9lTH6Oj4YzkvWU07iZecg/exec", {
-        method: "POST",
-        mode: "no-cors", // สำคัญมากเพื่อเลี่ยงปัญหา CORS
-        body: JSON.stringify({ userId: "testUser", imageData: imageData })
-      }).then(() => alert("บันทึกสำเร็จ!"));
-    }
-  </script>
+  // ✅ อ่านค่าพนักงานจาก URL จริง (ไม่ใช้ testUser อีกต่อไป)
+  const params = new URLSearchParams(location.search);
+  const empId   = params.get('empId')   || '';
+  const empName = params.get('empName') || '';
+
+  const badge = document.getElementById('emp-badge');
+  badge.textContent = empId ? `👤 ${empName} (${empId})` : '⚠️ ไม่พบข้อมูลพนักงาน';
+
+  const video  = document.getElementById('video');
+  const status = document.getElementById('status');
+  const btn    = document.getElementById('btn-capture');
+
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+    .then(stream => { video.srcObject = stream; })
+    .catch(err => { status.textContent = 'เปิดกล้องไม่ได้: ' + err; status.className = 'status error'; });
+
+  function capture() {
+    if (!empId) { alert('ไม่พบรหัสพนักงาน กรุณาปิดหน้านี้แล้วเปิดใหม่จากระบบหลัก'); return; }
+
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner"></span>กำลังบันทึก...';
+    status.className = 'status';
+
+    const canvas = document.getElementById('canvas');
+    // ลดขนาดภาพลง เพื่อไม่ให้เกิน Google Sheet limit ต่อ cell
+    const W = 240, H = 180;
+    canvas.width = W; canvas.height = H;
+    canvas.getContext('2d').drawImage(video, 0, 0, W, H);
+    const imageData = canvas.toDataURL('image/jpeg', 0.6);
+
+    fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",           // Apps Script ไม่รองรับ CORS header ปกติ
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ empId, empName, imageData })
+    })
+    .then(() => {
+      status.textContent = '✅ บันทึกสำเร็จ! กำลังกลับหน้าหลัก...';
+      status.className = 'status success';
+
+      // แจ้งหน้าหลัก (ถ้าเปิดผ่าน popup) แล้วปิดตัวเองอัตโนมัติ
+      if (window.opener) {
+        window.opener.postMessage({ type: 'faceEnrollDone', success: true, empId, empName }, '*');
+      }
+      setTimeout(() => window.close(), 1200);
+    })
+    .catch(err => {
+      status.textContent = '❌ บันทึกไม่สำเร็จ: ' + err;
+      status.className = 'status error';
+      btn.disabled = false;
+    });
+  }
+</script>
 </body>
 </html>
