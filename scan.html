@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สแกนใบหน้าเข้า-ออกงาน</title>
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI','Prompt',sans-serif; background:#0f172a; min-height:100vh;
+    display:flex; align-items:center; justify-content:center; }
+  .wrap { text-align:center; color:#fff; padding:16px; }
+  .video-wrap { position:relative; max-width:480px; margin:0 auto; }
+  video, canvas.overlay { width:100%; border-radius:16px; }
+  canvas.overlay { position:absolute; top:0; left:0; }
+  .result { margin-top:20px; padding:16px 24px; border-radius:14px; font-size:20px; font-weight:700;
+    min-height:60px; display:flex; align-items:center; justify-content:center; }
+  .result.idle { background:#1e293b; color:#94a3b8; }
+  .result.success { background:#16a34a; }
+  .result.fail { background:#dc2626; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay" class="overlay"></canvas>
+    </div>
+    <div class="result idle" id="result">🕒 กำลังเตรียมกล้อง...</div>
+  </div>
+
+<script>
+  const SCRIPT_URL = "https://script.google.com/macros/s/xxxxxxxx/exec"; // URL /exec เดียวกับ index.html
+  const MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const result = document.getElementById('result');
+  let busy = false;          // กันยิงซ้ำระหว่างรอผล
+  let cooldownUntil = 0;     // กันสแกนซ้ำติดกันของคนเดิม
+
+  async function init() {
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+      result.textContent = '🔍 กรุณาหันหน้าเข้ากล้อง';
+      loop();
+    };
+  }
+
+  async function loop() {
+    const options = new faceapi.TinyFaceDetectorOptions();
+    setInterval(async () => {
+      if (busy || Date.now() < cooldownUntil) return;
+
+      const detection = await faceapi.detectSingleFace(video, options)
+        .withFaceLandmarks().withFaceDescriptor();
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!detection) return;
+
+      faceapi.draw.drawDetections(overlay, [detection]);
+      busy = true;
+      result.className = 'result idle';
+      result.textContent = '⏳ กำลังตรวจสอบ...';
+
+      try {
+        const res = await fetch(SCRIPT_URL, {
+          method: "POST",
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action: 'scan', descriptor: Array.from(detection.descriptor) })
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+          const label = data.type === 'IN' ? '✅ ลงเวลาเข้างาน' : '👋 ลงเวลาออกงาน';
+          result.className = 'result success';
+          result.textContent = `${label}\n${data.empName} (${data.empId})`;
+        } else {
+          result.className = 'result fail';
+          result.textContent = '❌ ไม่พบข้อมูลใบหน้านี้ในระบบ';
+        }
+      } catch (err) {
+        result.className = 'result fail';
+        result.textContent = '❌ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+      }
+
+      cooldownUntil = Date.now() + 5000; // กันสแกนซ้ำ 5 วิ
+      setTimeout(() => {
+        busy = false;
+        result.className = 'result idle';
+        result.textContent = '🔍 กรุณาหันหน้าเข้ากล้อง';
+      }, 3000);
+    }, 700);
+  }
+
+  init();
+</script>
+</body>
+</html>
