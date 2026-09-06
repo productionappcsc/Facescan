@@ -78,14 +78,18 @@
         });
         const data = await res.json();
 
-        if (data.status === 'success') {
-          const label = data.type === 'IN' ? '✅ ลงเวลาเข้างาน' : '👋 ลงเวลาออกงาน';
-          result.className = 'result success';
-          result.textContent = `${label}\n${data.empName} (${data.empId})`;
-        } else {
-          result.className = 'result fail';
-          result.textContent = '❌ ไม่พบข้อมูลใบหน้านี้ในระบบ';
-        }
+      if (data.status === 'success') {
+  const label = data.type === 'IN' ? '✅ ลงเวลาเข้างาน' : '👋 ลงเวลาออกงาน';
+  result.className = 'result success';
+  result.textContent = `${label}\n${data.empName} (${data.empId})`;
+} else if (data.status === 'no_match') {
+  result.className = 'result fail';
+  result.textContent = '❌ ไม่พบข้อมูลใบหน้านี้ในระบบ';
+} else {
+  // ✅ แสดง error จริงจาก server แทนการเดา
+  result.className = 'result fail';
+  result.textContent = '⚠️ เกิดข้อผิดพลาด: ' + (data.message || 'ไม่ทราบสาเหตุ');
+}
       } catch (err) {
         result.className = 'result fail';
         result.textContent = '❌ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
