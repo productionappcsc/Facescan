@@ -3,113 +3,123 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>สแกนใบหน้าพนักงาน</title>
+<title>ลงทะเบียนใบหน้าพนักงาน</title>
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Segoe UI', 'Prompt', sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    padding: 16px;
-  }
-  .card {
-    background: #fff; border-radius: 20px; padding: 24px;
-    box-shadow: 0 10px 40px rgba(0,0,0,.25);
-    max-width: 360px; width: 100%; text-align: center;
-  }
-  .emp-badge {
-    background: #eef2ff; color: #4338ca; border-radius: 12px;
-    padding: 10px 14px; font-weight: 600; margin-bottom: 16px; font-size: 15px;
-  }
-  video, canvas {
-    width: 100%; border-radius: 16px; background: #111;
-  }
-  canvas { display: none; }
-  button {
-    width: 100%; margin-top: 16px; padding: 14px;
-    border: none; border-radius: 12px; font-size: 16px; font-weight: 600;
-    cursor: pointer; transition: .2s;
-  }
+  body { font-family: 'Segoe UI', 'Prompt', sans-serif; background: linear-gradient(135deg,#667eea,#764ba2);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .card { background: #fff; border-radius: 20px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,.25);
+    max-width: 360px; width: 100%; text-align: center; }
+  .emp-badge { background: #eef2ff; color: #4338ca; border-radius: 12px; padding: 10px 14px;
+    font-weight: 600; margin-bottom: 16px; font-size: 15px; }
+  .video-wrap { position: relative; }
+  video, canvas.overlay { width: 100%; border-radius: 16px; }
+  canvas.overlay { position: absolute; top: 0; left: 0; }
+  canvas#snapshot { display: none; }
+  button { width: 100%; margin-top: 16px; padding: 14px; border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 600; cursor: pointer; }
   #btn-capture { background: #4f46e5; color: #fff; }
-  #btn-capture:active { transform: scale(0.97); }
-  #btn-capture:disabled { background: #a5a5a5; cursor: not-allowed; }
+  #btn-capture:disabled { background: #a5a5a5; }
   .status { margin-top: 14px; font-size: 14px; min-height: 20px; color: #555; }
   .status.success { color: #16a34a; font-weight: 700; }
   .status.error { color: #dc2626; font-weight: 700; }
-  .spinner {
-    display: inline-block; width: 16px; height: 16px;
-    border: 2px solid #ddd; border-top-color: #4f46e5;
-    border-radius: 50%; animation: spin .7s linear infinite;
-    vertical-align: middle; margin-right: 6px;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .status.warn { color: #d97706; font-weight: 700; }
 </style>
 </head>
 <body>
   <div class="card">
     <div class="emp-badge" id="emp-badge">กำลังโหลดข้อมูลพนักงาน...</div>
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-    <button id="btn-capture" onclick="capture()">📸 ถ่ายภาพและบันทึก</button>
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay" class="overlay"></canvas>
+    </div>
+    <canvas id="snapshot"></canvas>
+    <button id="btn-capture" disabled onclick="capture()">📸 กำลังโหลดโมเดล...</button>
     <div class="status" id="status"></div>
   </div>
 
 <script>
-  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPsveHyub_MogV0rrtAWE9b5M6Ytc4aTe24WqvL9GlITdug9lTH6Oj4YzkvWU07iZecg/exec";
+  const SCRIPT_URL = "https://script.google.com/macros/s/xxxxxxxx/exec"; // ใส่ URL /exec ของคุณ
+  const MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
 
-  // ✅ อ่านค่าพนักงานจาก URL จริง (ไม่ใช้ testUser อีกต่อไป)
   const params = new URLSearchParams(location.search);
-  const empId   = params.get('empId')   || '';
+  const empId = params.get('empId') || '';
   const empName = params.get('empName') || '';
+  document.getElementById('emp-badge').textContent = empId ? `👤 ${empName} (${empId})` : '⚠️ ไม่พบข้อมูลพนักงาน';
 
-  const badge = document.getElementById('emp-badge');
-  badge.textContent = empId ? `👤 ${empName} (${empId})` : '⚠️ ไม่พบข้อมูลพนักงาน';
-
-  const video  = document.getElementById('video');
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const btn = document.getElementById('btn-capture');
   const status = document.getElementById('status');
-  const btn    = document.getElementById('btn-capture');
+  let currentDescriptor = null;
 
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
-    .then(stream => { video.srcObject = stream; })
-    .catch(err => { status.textContent = 'เปิดกล้องไม่ได้: ' + err; status.className = 'status error'; });
+  async function init() {
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+      btn.textContent = "📸 ถ่ายภาพและบันทึก";
+      btn.disabled = false;
+      detectLoop();
+    };
+  }
+
+  async function detectLoop() {
+    const options = new faceapi.TinyFaceDetectorOptions();
+    setInterval(async () => {
+      const result = await faceapi.detectSingleFace(video, options)
+        .withFaceLandmarks().withFaceDescriptor();
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (result) {
+        currentDescriptor = Array.from(result.descriptor);
+        faceapi.draw.drawDetections(overlay, [result]);
+        status.textContent = '✅ ตรวจพบใบหน้า พร้อมบันทึก';
+        status.className = 'status success';
+      } else {
+        currentDescriptor = null;
+        status.textContent = '🔍 กรุณาหันหน้าเข้ากล้องให้ชัดเจน';
+        status.className = 'status warn';
+      }
+    }, 500);
+  }
 
   function capture() {
     if (!empId) { alert('ไม่พบรหัสพนักงาน กรุณาปิดหน้านี้แล้วเปิดใหม่จากระบบหลัก'); return; }
+    if (!currentDescriptor) { alert('ไม่พบใบหน้าในเฟรม กรุณาลองใหม่'); return; }
 
     btn.disabled = true;
-    status.innerHTML = '<span class="spinner"></span>กำลังบันทึก...';
+    status.textContent = 'กำลังบันทึก...';
     status.className = 'status';
 
-    const canvas = document.getElementById('canvas');
-    // ลดขนาดภาพลง เพื่อไม่ให้เกิน Google Sheet limit ต่อ cell
-    const W = 240, H = 180;
-    canvas.width = W; canvas.height = H;
-    canvas.getContext('2d').drawImage(video, 0, 0, W, H);
-    const imageData = canvas.toDataURL('image/jpeg', 0.6);
+    const snap = document.getElementById('snapshot');
+    snap.width = 240; snap.height = 180;
+    snap.getContext('2d').drawImage(video, 0, 0, 240, 180);
+    const imageData = snap.toDataURL('image/jpeg', 0.6);
 
     fetch(SCRIPT_URL, {
-      method: "POST",
-      mode: "no-cors",           // Apps Script ไม่รองรับ CORS header ปกติ
+      method: "POST", mode: "no-cors",
       headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ empId, empName, imageData })
-    })
-    .then(() => {
+      body: JSON.stringify({ action: 'enroll', empId, empName, imageData, descriptor: currentDescriptor })
+    }).then(() => {
       status.textContent = '✅ บันทึกสำเร็จ! กำลังกลับหน้าหลัก...';
       status.className = 'status success';
-
-      // แจ้งหน้าหลัก (ถ้าเปิดผ่าน popup) แล้วปิดตัวเองอัตโนมัติ
-      if (window.opener) {
-        window.opener.postMessage({ type: 'faceEnrollDone', success: true, empId, empName }, '*');
-      }
+      if (window.opener) window.opener.postMessage({ type: 'faceEnrollDone', success: true, empId, empName }, '*');
       setTimeout(() => window.close(), 1200);
-    })
-    .catch(err => {
+    }).catch(err => {
       status.textContent = '❌ บันทึกไม่สำเร็จ: ' + err;
       status.className = 'status error';
       btn.disabled = false;
     });
   }
+
+  init();
 </script>
 </body>
 </html>
