@@ -38,11 +38,12 @@
   const result = document.getElementById('result');
 
   let busy = false;              // กันยิงซ้ำระหว่างรอผลจาก server
+  let ticking = false;   // กัน tick ซ้อนระหว่างรอ detection
   let autoCloseAfterScan = true; // ค่า default ถ้าโหลด config ไม่สำเร็จ
 
   // ── ระบบ cooldown แยกตามรายคน (ใช้ descriptor เทียบแทน empId เพราะยังไม่รู้ว่าเป็นใครก่อนยิง request) ──
   let recentScans = [];          // เก็บ { descriptor, empId, time } ของแต่ละคนที่เพิ่งสแกนสำเร็จ
-  const COOLDOWN_MS = 5000;      // เวลากันสแกนซ้ำต่อคน (5 วิ)
+  const COOLDOWN_MS = 60000;      // เวลากันสแกนซ้ำต่อคน (5 วิ)
   const MATCH_THRESHOLD = 0.5;   // ยิ่งน้อยยิ่งเข้มงวดว่าเป็น "หน้าเดิม"
 
   function findRecentScan(descriptor) {
@@ -90,20 +91,20 @@
     }
   }
 
-  async function loop() {
-    const options = new faceapi.TinyFaceDetectorOptions();
-    setInterval(async () => {
-      if (busy) return; // กันยิง request ซ้อนระหว่างรอผลลัพธ์ก่อนหน้า
-
+async function loop() {
+  const options = new faceapi.TinyFaceDetectorOptions();
+  setInterval(async () => {
+    if (busy || ticking) return;
+    ticking = true;                       // ⬅️ ล็อกทันที ก่อน await
+    try {
       const detection = await faceapi.detectSingleFace(video, options)
         .withFaceLandmarks().withFaceDescriptor();
+
       const ctx = overlay.getContext('2d');
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       if (!detection) return;
-
       faceapi.draw.drawDetections(overlay, [detection]);
 
-      // ── เช็คก่อนว่าใบหน้านี้เพิ่งสแกนไปหรือยัง (แยกตามคน ไม่กระทบคนอื่น) ──
       const recent = findRecentScan(detection.descriptor);
       if (recent) {
         const secLeft = Math.ceil((COOLDOWN_MS - (Date.now() - recent.time)) / 1000);
@@ -112,39 +113,39 @@
         return;
       }
 
-      busy = true;
+      busy = true;                         // ยึดยาวจนครบ 3 วิ
       result.className = 'result idle';
       result.textContent = '⏳ กำลังตรวจสอบ...';
 
-      try {
-        const res = await fetch(SCRIPT_URL, {
-          method: "POST",
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ action: 'scan', descriptor: Array.from(detection.descriptor) })
-        });
-        const data = await res.json();
+      const res = await fetch(SCRIPT_URL, {
+        method: "POST",
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({
+          action: 'scan',
+          descriptor: Array.from(detection.descriptor),
+          confidence: Number(detection.detection.score.toFixed(2))   // ⬅️ ส่ง confidence ไปด้วย
+        })
+      });
+      const data = await res.json();
 
-        if (data.status === 'success') {
+      if (data.status === 'success') {
+        recentScans.push({ descriptor: detection.descriptor, empId: data.empId, time: Date.now() });
+
+        if (data.duplicate) {
+          result.className = 'result idle';
+          result.textContent = `⏳ ${data.empName} สแกนไปแล้ว (ระบบข้ามให้)`;
+        } else {
           const label = data.type === 'IN' ? '✅ ลงเวลาเข้างาน' : '👋 ลงเวลาออกงาน';
           result.className = 'result success';
           result.textContent = `${label}\n${data.empName} (${data.empId})`;
-
-          // ── บันทึก cooldown เฉพาะคนนี้เท่านั้น ไม่กระทบคนอื่นที่มาสแกนต่อ ──
-          recentScans.push({ descriptor: detection.descriptor, empId: data.empId, time: Date.now() });
-
-          if (autoCloseAfterScan) {
-            stopCameraAndClose();
-          }
-        } else if (data.status === 'no_match') {
-          result.className = 'result fail';
-          result.textContent = '❌ ไม่พบข้อมูลใบหน้านี้ในระบบ';
-        } else {
-          result.className = 'result fail';
-          result.textContent = '⚠️ เกิดข้อผิดพลาด: ' + (data.message || 'ไม่ทราบสาเหตุ');
+          if (autoCloseAfterScan) stopCameraAndClose();
         }
-      } catch (err) {
+      } else if (data.status === 'no_match') {
         result.className = 'result fail';
-        result.textContent = '❌ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+        result.textContent = '❌ ไม่พบข้อมูลใบหน้านี้ในระบบ';
+      } else {
+        result.className = 'result fail';
+        result.textContent = '⚠️ เกิดข้อผิดพลาด: ' + (data.message || 'ไม่ทราบสาเหตุ');
       }
 
       setTimeout(() => {
@@ -152,8 +153,16 @@
         result.className = 'result idle';
         result.textContent = '🔍 กรุณาหันหน้าเข้ากล้อง';
       }, 3000);
-    }, 700);
-  }
+
+    } catch (err) {
+      busy = false;
+      result.className = 'result fail';
+      result.textContent = '❌ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+    } finally {
+      ticking = false;                     // ⬅️ ปลดล็อก tick เสมอ
+    }
+  }, 700);
+}
 
   function stopCameraAndClose() {
     // ปิดกล้องก่อนเสมอ เพื่อความเป็นส่วนตัวและประหยัดแบตเตอรี่
